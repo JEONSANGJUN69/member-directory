@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>회원 명부</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Noto Sans KR', sans-serif; background: #f4f6fb; min-height: 100vh; }
+  header {
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 60%, #0f3460 100%);
+    padding: 32px 20px 24px;
+    text-align: center;
+    position: sticky; top: 0; z-index: 100;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.25);
+  }
+  header h1 { font-size: 22px; font-weight: 700; color: #fff; margin-bottom: 16px; }
+  .search-wrap {
+    display: flex; align-items: center;
+    background: rgba(255,255,255,0.12);
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 12px; padding: 10px 14px;
+    max-width: 480px; margin: 0 auto 10px;
+  }
+  .search-wrap svg { width: 18px; height: 18px; stroke: rgba(255,255,255,0.6); flex-shrink: 0; margin-right: 10px; }
+  #searchInput {
+    background: none; border: none; outline: none;
+    color: #fff; font-size: 14px;
+    font-family: 'Noto Sans KR', sans-serif; width: 100%;
+  }
+  #searchInput::placeholder { color: rgba(255,255,255,0.5); }
+  .stats { font-size: 12px; color: rgba(255,255,255,0.5); }
+  main { max-width: 560px; margin: 0 auto; padding: 20px 16px 40px; }
+  .member-card {
+    display: flex; align-items: center; gap: 14px;
+    background: #fff; border-radius: 16px; padding: 16px;
+    margin-bottom: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    transition: transform 0.15s, box-shadow 0.15s;
+  }
+  .member-card:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,0.1); }
+  .avatar {
+    width: 52px; height: 52px; border-radius: 50%;
+    flex-shrink: 0; display: flex; align-items: center;
+    justify-content: center; font-size: 20px; font-weight: 700;
+    color: #fff; overflow: hidden;
+  }
+  .avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
+  .info { flex: 1; min-width: 0; }
+  .name { font-size: 16px; font-weight: 700; color: #1a1a2e; margin-bottom: 3px; }
+  .company { font-size: 13px; color: #555; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .phone { font-size: 13px; color: #0f3460; font-weight: 500; }
+  .call-btn {
+    width: 40px; height: 40px; border-radius: 50%;
+    background: #f0f4ff; border: none;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; flex-shrink: 0; text-decoration: none;
+    transition: background 0.2s;
+  }
+  .call-btn:hover { background: #dce4ff; }
+  .call-btn svg { width: 18px; height: 18px; stroke: #0f3460; }
+  .loading { text-align: center; padding: 60px 20px; color: #888; font-size: 14px; }
+  .spinner {
+    width: 32px; height: 32px; border: 3px solid #e0e0e0;
+    border-top-color: #0f3460; border-radius: 50%;
+    animation: spin 0.8s linear infinite; margin: 0 auto 16px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .empty { text-align: center; padding: 60px 20px; color: #aaa; font-size: 14px; }
+  .error {
+    background: #fff0f0; border: 1px solid #fcc;
+    border-radius: 12px; padding: 20px; margin: 20px 0;
+    color: #c00; font-size: 13px; text-align: center; line-height: 1.8;
+  }
+  .av0{background:#0f3460} .av1{background:#e94560} .av2{background:#1a6b4a}
+  .av3{background:#7b3fa0} .av4{background:#c47d16} .av5{background:#1a6880}
+</style>
+</head>
+<body>
+<header>
+  <h1>회원 명부</h1>
+  <div class="search-wrap">
+    <svg fill="none" viewBox="0 0 24 24" stroke-width="2">
+      <circle cx="11" cy="11" r="8"/>
+      <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35"/>
+    </svg>
+    <input id="searchInput" type="text" placeholder="이름, 회사, 직책 검색..." oninput="filterMembers()">
+  </div>
+  <div class="stats" id="stats"></div>
+</header>
+
+<main id="memberList">
+  <div class="loading"><div class="spinner"></div>명부를 불러오는 중...</div>
+</main>
+
+<script>
+const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSzl9CE5q0W6oBsmQlQB10_y8zksUnofBS3RAvQqixDaScmgRyvPJzGK18deM7pTd3agpI1DtvuLkNR/pub?gid=0&single=true&output=csv';
+let allMembers = [];
+
+async function loadMembers() {
+  try {
+    const res = await fetch(CSV_URL);
+    if (!res.ok) throw new Error();
+    const text = await res.text();
+    const rows = parseCSV(text);
+    if (rows.length < 2) { showError(); return; }
+
+    allMembers = rows.slice(1)
+      .filter(r => r[0] && r[0].trim())
+      .map((r, i) => ({
+        name:    (r[0]||'').trim(),
+        phone:   (r[1]||'').trim(),
+        company: (r[2]||'').trim(),
+        title:   (r[3]||'').trim(),
+        photo:   (r[4]||'').trim(),
+        idx: i
+      }));
+
+    renderMembers(allMembers);
+  } catch(e) {
+    showError();
+  }
+}
+
+function parseCSV(text) {
+  return text.split('\n').filter(l => l.trim()).map(line => {
+    const cols = []; let cur = '', inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') inQ = !inQ;
+      else if (ch === ',' && !inQ) { cols.push(cur.trim()); cur = ''; }
+      else cur += ch;
+    }
+    cols.push(cur.trim());
+    return cols;
+  });
+}
+
+function renderMembers(list) {
+  document.getElementById('stats').textContent = `총 ${list.length}명`;
+  const el = document.getElementById('memberList');
+  if (!list.length) { el.innerHTML = '<div class="empty">검색 결과가 없습니다.</div>'; return; }
+
+  const colors = ['av0','av1','av2','av3','av4','av5'];
+  el.innerHTML = list.map(m => {
+    const cl = colors[m.idx % 6];
+    const ini = m.name[0] || '?';
+    const avatar = m.photo
+      ? `<div class="avatar"><img src="${m.photo}" onerror="this.parentElement.className='avatar ${cl}';this.parentElement.textContent='${ini}'"></div>`
+      : `<div class="avatar ${cl}">${ini}</div>`;
+    const sub = [m.company, m.title].filter(Boolean).join(' / ');
+    const tel = m.phone.replace(/[^0-9]/g,'');
+    return `<div class="member-card">
+      ${avatar}
+      <div class="info">
+        <div class="name">${m.name}</div>
+        ${sub ? `<div class="company">${sub}</div>` : ''}
+        ${m.phone ? `<div class="phone">${m.phone}</div>` : ''}
+      </div>
+      ${tel ? `<a class="call-btn" href="tel:${tel}">
+        <svg fill="none" viewBox="0 0 24 24" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.948V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 8V5z"/>
+        </svg>
+      </a>` : ''}
+    </div>`;
+  }).join('');
+}
+
+function filterMembers() {
+  const q = document.getElementById('searchInput').value.toLowerCase().trim();
+  if (!q) { renderMembers(allMembers); return; }
+  renderMembers(allMembers.filter(m =>
+    m.name.toLowerCase().includes(q) ||
+    m.company.toLowerCase().includes(q) ||
+    m.title.toLowerCase().includes(q) ||
+    m.phone.includes(q)
+  ));
+}
+
+function showError() {
+  document.getElementById('memberList').innerHTML =
+    `<div class="error">⚠️ 데이터를 불러오지 못했습니다.<br><br>구글 시트에 데이터가 입력되어 있는지 확인해 주세요.</div>`;
+}
+
+loadMembers();
+</script>
+</body>
+</html>
